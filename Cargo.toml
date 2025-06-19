@@ -1,0 +1,17 @@
+[package]
+name = "tomorin"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+chrono = "0.4.39"
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "process"] }
+tracing = "0.1.40"
+tracing-subscriber = { version="0.3.18", features = ["chrono"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "rustls-tls", "rustls-tls-native-roots"] }
+grammers-client = "0.7.0"
+miette = { version="4.3.0", features=["fancy"] }
+knuffel = "3.2.0"
+futures-util = "0.3.31"
