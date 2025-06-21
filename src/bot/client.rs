@@ -5,10 +5,10 @@ use grammers_client::{
     grammers_tl_types::{enums::MessageEntity, types::MessageEntityPre},
     types::{Message, User},
 };
-use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
-    time::interval,
+    process::Command,
+    time::{Instant, interval_at},
 };
 
 pub struct TomorinClient {
@@ -60,7 +60,7 @@ impl TomorinClient {
             if let Err(SignInError::PasswordRequired(password_token)) =
                 client.sign_in(&token, &code).await
             {
-                if let Some(pw) = reader::StdinReader::read("Password: ").ok() {
+                if let Ok(pw) = reader::StdinReader::read("Password: ") {
                     client.check_password(password_token, pw.trim()).await?;
                 } else {
                     return Err(anyhow::anyhow!("Password is required but not provided"));
@@ -131,36 +131,41 @@ impl TomorinClient {
         for<'a> <F as AsyncFnMut<(&'a str,)>>::CallRefFuture<'a>:
             Future<Output = anyhow::Result<()>> + Send + 'a,
     {
-        let mut ticker = interval(Duration::from_secs(1));
+        let mut ticker = interval_at(
+            Instant::now()
+                .checked_add(Duration::from_millis(800))
+                .unwrap(),
+            Duration::from_secs(1),
+        );
         let mut stdout_done = false;
         let mut stderr_done = false;
 
         loop {
             tokio::select! {
-                    res = stdout_reader.next_line(), if !stdout_done => match res {
-                        Ok(Some(line)) => {
-                            msg.push_str(&line);
-                            msg.push('\n');
-                        }
-                        Ok(None) => stdout_done = true,
-                        Err(e) => return Err(e.into()),
-                    },
-                    res = stderr_reader.next_line(), if !stderr_done => match res {
-                        Ok(Some(line)) => {
-                            msg.push_str(&line);
-                            msg.push('\n');
-                        }
-                        Ok(None) => stderr_done = true,
-                        Err(e) => return Err(e.into()),
-                    },
-                    _ = ticker.tick() => {
-                        f(msg).await?;
-
-                        if stdout_done && stderr_done {
-                            break;
-                        }
+                res = stdout_reader.next_line(), if !stdout_done => match res {
+                    Ok(Some(line)) => {
+                        msg.push_str(&line);
+                        msg.push('\n');
                     }
-                    else => break,
+                    Ok(None) => stdout_done = true,
+                    Err(e) => return Err(e.into()),
+                },
+                res = stderr_reader.next_line(), if !stderr_done => match res {
+                    Ok(Some(line)) => {
+                        msg.push_str(&line);
+                        msg.push('\n');
+                    }
+                    Ok(None) => stderr_done = true,
+                    Err(e) => return Err(e.into()),
+                },
+                _ = ticker.tick() => {
+                    f(msg).await?;
+
+                    if stdout_done && stderr_done {
+                        break;
+                    }
+                }
+                else => break,
             }
         }
 
@@ -168,7 +173,7 @@ impl TomorinClient {
     }
 
     pub async fn handle_cmd(&self, cmd: &str, m: &Message) -> anyhow::Result<()> {
-        let input_msg = format!("❯ {}", cmd);
+        let input_msg = format!("❯ {cmd}");
         m.edit(
             InputMessage::text(&input_msg).fmt_entities(vec![MessageEntity::Pre(
                 MessageEntityPre {
@@ -203,8 +208,7 @@ impl TomorinClient {
             Ok(c) => c,
             Err(e) => {
                 resp.push_str(&format!("笨！\n{e}"));
-                self.edit_pre_msg(m, &resp, "StdErr")
-                    .await?;
+                self.edit_pre_msg(m, &resp, "StdErr").await?;
                 return Ok(());
             }
         };
@@ -220,7 +224,7 @@ impl TomorinClient {
             &mut stdout_reader,
             &mut stderr_reader,
             &mut resp,
-            &mut async move |resp| client.edit_pre_msg(&m2, &resp, "StdOut").await,
+            &mut async move |resp| client.edit_pre_msg(&m2, resp, "StdOut").await,
         )
         .await?;
 
@@ -229,7 +233,7 @@ impl TomorinClient {
             resp.push_str("Done.");
             self.edit_pre_msg(m, &resp, "StdOut").await?;
         } else {
-            resp.push_str(&format!("它烂掉了！{}", status));
+            resp.push_str(&format!("笨！{status}"));
             self.edit_pre_msg(m, &resp, "StdErr").await?;
         }
 
