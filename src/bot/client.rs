@@ -1,13 +1,15 @@
-use anyhow::Ok;
+use std::{process::Stdio, time::Duration};
+
 use grammers_client::{
     Client, InputMessage,
-    grammers_tl_types::{
-        enums::MessageEntity,
-        types::{MessageEntityCode, MessageEntityPre},
-    },
+    grammers_tl_types::{enums::MessageEntity, types::MessageEntityPre},
     types::{Message, User},
 };
 use tokio::process::Command;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    time::interval,
+};
 
 pub struct TomorinClient {
     pub client: Client,
@@ -83,20 +85,85 @@ impl TomorinClient {
                 if let Some(a) = m.sender()
                     && a.id() == self.me.id()
                 {
-                    const CMD_PREFIX1: &str = ",";
-                    const CMD_PREFIX2: &str = "，";
+                    const CMD_PREFIXES: [&str; 4] = [",", "，", ".", "。"];
 
                     let text = m.text();
-                    if text.starts_with(CMD_PREFIX1) || text.starts_with(CMD_PREFIX2) {
-                        let cmd = text
-                            .trim_start_matches(CMD_PREFIX1)
-                            .trim_start_matches(CMD_PREFIX2);
-                        self.handle_cmd(cmd, &m).await?;
+
+                    for prefix in CMD_PREFIXES {
+                        if text.starts_with(prefix) {
+                            let cmd = text.trim_start_matches(prefix);
+                            self.handle_cmd(cmd, &m).await?;
+                        }
                     }
                 }
             }
             _ => (),
         };
+        Ok(())
+    }
+
+    async fn edit_pre_msg(&self, m: &Message, resp: &str, lang: &str) -> anyhow::Result<()> {
+        let trimmed = resp.trim();
+        let msg =
+            InputMessage::text(trimmed).fmt_entities(vec![MessageEntity::Pre(MessageEntityPre {
+                offset: 0,
+                length: trimmed.chars().count() as i32,
+                language: lang.to_string(),
+            })]);
+        match m.edit(msg).await {
+            Err(grammers_client::InvocationError::Rpc(e)) if e.name == "MESSAGE_NOT_MODIFIED" => {
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+            Ok(_) => Ok(()),
+        }
+    }
+
+    async fn read_buffer_per_tick<F>(
+        &self,
+        stdout_reader: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+        stderr_reader: &mut tokio::io::Lines<BufReader<tokio::process::ChildStderr>>,
+        msg: &mut String,
+        f: &mut F,
+    ) -> anyhow::Result<()>
+    where
+        for<'a> F: AsyncFnMut(&'a str) -> anyhow::Result<()> + Send + 'static,
+        for<'a> <F as AsyncFnMut<(&'a str,)>>::CallRefFuture<'a>:
+            Future<Output = anyhow::Result<()>> + Send + 'a,
+    {
+        let mut ticker = interval(Duration::from_secs(1));
+        let mut stdout_done = false;
+        let mut stderr_done = false;
+
+        loop {
+            tokio::select! {
+                    res = stdout_reader.next_line(), if !stdout_done => match res {
+                        Ok(Some(line)) => {
+                            msg.push_str(&line);
+                            msg.push('\n');
+                        }
+                        Ok(None) => stdout_done = true,
+                        Err(e) => return Err(e.into()),
+                    },
+                    res = stderr_reader.next_line(), if !stderr_done => match res {
+                        Ok(Some(line)) => {
+                            msg.push_str(&line);
+                            msg.push('\n');
+                        }
+                        Ok(None) => stderr_done = true,
+                        Err(e) => return Err(e.into()),
+                    },
+                    _ = ticker.tick() => {
+                        f(msg).await?;
+
+                        if stdout_done && stderr_done {
+                            break;
+                        }
+                    }
+                    else => break,
+            }
+        }
+
         Ok(())
     }
 
@@ -124,38 +191,49 @@ impl TomorinClient {
         };
         let args = parts;
 
-        let output = Command::new(program)
+        let mut resp = input_msg.clone();
+        resp.push('\n');
+
+        let mut child = match Command::new(program)
             .args(args)
-            .output()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to spawn command `{}`: {}", program, e))?;
-
-        let mut resp = String::new();
-        resp.push_str(&input_msg);
-        resp.push_str("\n");
-        if !output.stdout.is_empty() {
-            resp.push_str(&String::from_utf8_lossy(&output.stdout));
-        }
-        if !output.stderr.is_empty() {
-            resp.push_str(&String::from_utf8_lossy(&output.stderr));
-        }
-
-        if resp.is_empty() {
-            resp.push_str("Command produced no output");
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                resp.push_str(&format!("笨！\n{e}"));
+                self.edit_pre_msg(m, &resp, "StdErr")
+                    .await?;
+                return Ok(());
+            }
         };
 
-        let resp = resp.trim_end();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let mut stdout_reader = BufReader::new(stdout).lines();
+        let mut stderr_reader = BufReader::new(stderr).lines();
 
-        let mono_msg =
-            InputMessage::text(resp).fmt_entities(vec![MessageEntity::Pre(MessageEntityPre {
-                offset: 0,
-                length: resp.chars().count() as i32,
-                language: "StdOut".to_string(),
-            })]);
+        let client = self.clone();
+        let m2 = m.clone();
+        self.read_buffer_per_tick(
+            &mut stdout_reader,
+            &mut stderr_reader,
+            &mut resp,
+            &mut async move |resp| client.edit_pre_msg(&m2, &resp, "StdOut").await,
+        )
+        .await?;
 
-        m.edit(mono_msg)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to edit message: {e}"))
+        let status = child.wait().await?;
+        if status.success() {
+            resp.push_str("Done.");
+            self.edit_pre_msg(m, &resp, "StdOut").await?;
+        } else {
+            resp.push_str(&format!("它烂掉了！{}", status));
+            self.edit_pre_msg(m, &resp, "StdErr").await?;
+        }
+
+        Ok(())
     }
 }
 

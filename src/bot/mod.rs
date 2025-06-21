@@ -1,21 +1,20 @@
 mod client;
-mod cmd;
 
 use client::TomorinClient;
 use futures_util::future::{Either, select};
-use std::pin::pin;
+use std::{pin::pin, sync::Arc};
 use tokio::task;
 
 use super::conf::Conf;
 
 pub struct UserBot {
-    client: TomorinClient,
+    client: Arc<TomorinClient>,
 }
 
 impl UserBot {
     pub async fn new(conf: Conf) -> anyhow::Result<Self> {
         Ok(Self {
-            client: TomorinClient::new(conf).await?,
+            client: Arc::new(TomorinClient::new(conf).await?),
         })
     }
 
