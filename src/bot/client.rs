@@ -173,19 +173,6 @@ impl TomorinClient {
     }
 
     pub async fn handle_cmd(&self, cmd: &str, m: &Message) -> anyhow::Result<()> {
-        let input_msg = format!("❯ {cmd}");
-        m.edit(
-            InputMessage::text(&input_msg).fmt_entities(vec![MessageEntity::Pre(
-                MessageEntityPre {
-                    offset: 0,
-                    length: input_msg.chars().count() as i32,
-                    language: "StdOut".to_string(),
-                },
-            )]),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to edit message: {e}"))?;
-
         let mut parts = cmd.split_whitespace();
         let program = match parts.next() {
             Some(p) => p,
@@ -196,7 +183,7 @@ impl TomorinClient {
         };
         let args = parts;
 
-        let mut resp = input_msg.clone();
+        let mut resp = format!("❯ {cmd}");
         resp.push('\n');
 
         let mut child = match Command::new(program)
@@ -227,15 +214,6 @@ impl TomorinClient {
             &mut async move |resp| client.edit_pre_msg(&m2, resp, "StdOut").await,
         )
         .await?;
-
-        let status = child.wait().await?;
-        if status.success() {
-            resp.push_str("Done.");
-            self.edit_pre_msg(m, &resp, "StdOut").await?;
-        } else {
-            resp.push_str(&format!("笨！{status}"));
-            self.edit_pre_msg(m, &resp, "StdErr").await?;
-        }
 
         Ok(())
     }
