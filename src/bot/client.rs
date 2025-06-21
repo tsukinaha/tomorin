@@ -1,9 +1,7 @@
 use std::{process::Stdio, time::Duration};
 
 use grammers_client::{
-    Client, InputMessage,
-    grammers_tl_types::{enums::MessageEntity, types::MessageEntityPre},
-    types::{Message, User},
+    grammers_tl_types::{enums::MessageEntity, types::MessageEntityBlockquote}, types::{Message, User}, Client, InputMessage
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::{
@@ -102,13 +100,13 @@ impl TomorinClient {
         Ok(())
     }
 
-    async fn edit_pre_msg(&self, m: &Message, resp: &str, lang: &str) -> anyhow::Result<()> {
+    async fn edit_pre_msg(&self, m: &Message, resp: &str) -> anyhow::Result<()> {
         let trimmed = resp.trim();
         let msg =
-            InputMessage::text(trimmed).fmt_entities(vec![MessageEntity::Pre(MessageEntityPre {
+            InputMessage::text(trimmed).fmt_entities(vec![MessageEntity::Blockquote(MessageEntityBlockquote {
                 offset: 0,
                 length: trimmed.chars().count() as i32,
-                language: lang.to_string(),
+                collapsed: true,
             })]);
         match m.edit(msg).await {
             Err(grammers_client::InvocationError::Rpc(e)) if e.name == "MESSAGE_NOT_MODIFIED" => {
@@ -195,7 +193,7 @@ impl TomorinClient {
             Ok(c) => c,
             Err(e) => {
                 resp.push_str(&format!("笨！\n{e}"));
-                self.edit_pre_msg(m, &resp, "StdErr").await?;
+                self.edit_pre_msg(m, &resp).await?;
                 return Ok(());
             }
         };
@@ -211,7 +209,7 @@ impl TomorinClient {
             &mut stdout_reader,
             &mut stderr_reader,
             &mut resp,
-            &mut async move |resp| client.edit_pre_msg(&m2, resp, "StdOut").await,
+            &mut async move |resp| client.edit_pre_msg(&m2, resp).await,
         )
         .await?;
 
