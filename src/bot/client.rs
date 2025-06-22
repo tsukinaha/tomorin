@@ -226,9 +226,15 @@ impl TomorinClient {
 
     pub async fn handle_repeat(&self, m: &Message) -> anyhow::Result<()> {
         let reply_m = m.get_reply().await?;
-        if let Some(reply) = reply_m {
-            reply.forward_to(reply.chat()).await?;
-        }
+        if let Some(reply) = reply_m
+            && reply.forward_to(reply.chat()).await.is_err() {
+                let mut input_message = InputMessage::text(reply.text())
+                    .fmt_entities(reply.fmt_entities().cloned().unwrap_or_default());
+                if let Some(ref media) = reply.media() {
+                    input_message = input_message.copy_media(media);
+                }
+                self.client.send_message(reply.chat(), input_message).await?;
+            }
         m.delete().await?;
 
         Ok(())
