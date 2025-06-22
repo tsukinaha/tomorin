@@ -25,14 +25,19 @@ impl UserBot {
 
             let update = match select(exit, upd).await {
                 Either::Left(_) => break,
-                Either::Right((u, _)) => u?,
+                Either::Right((u, _)) => u,
+            };
+
+            let Ok(update) = update else {
+                tracing::warn!("Failed to get update");
+                continue;
             };
 
             let client = self.client.clone();
             task::spawn(async move {
                 match client.update(update).await {
                     Ok(_) => {}
-                    Err(e) => eprintln!("Error handling updates!: {e}"),
+                    Err(e) => tracing::error!("Error handling update: {e}"),
                 }
             });
         }

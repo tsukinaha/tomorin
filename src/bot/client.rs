@@ -86,8 +86,14 @@ impl TomorinClient {
                     && a.id() == self.me.id()
                 {
                     const CMD_PREFIXES: [&str; 4] = [",", "，", ".", "。"];
+                    const REPEAT: &str = "+";
 
                     let text = m.text();
+
+                    if text == REPEAT {
+                        self.handle_repeat(&m).await?;
+                        return Ok(());
+                    }
 
                     for prefix in CMD_PREFIXES {
                         if text.starts_with(prefix) {
@@ -214,6 +220,16 @@ impl TomorinClient {
             &mut async move |resp| client.edit_pre_msg(&m2, resp, "StdOut").await,
         )
         .await?;
+
+        Ok(())
+    }
+
+    pub async fn handle_repeat(&self, m: &Message) -> anyhow::Result<()> {
+        let reply_m = m.get_reply().await?;
+        if let Some(reply) = reply_m {
+            reply.forward_to(reply.chat()).await?;
+        }
+        m.delete().await?;
 
         Ok(())
     }
