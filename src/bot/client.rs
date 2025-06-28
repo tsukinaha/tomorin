@@ -110,8 +110,24 @@ impl TomorinClient {
 
     async fn edit_pre_msg(&self, m: &Message, resp: &str, lang: &str) -> anyhow::Result<()> {
         let trimmed = resp.trim();
+
+        let mut lines = trimmed.lines().rev().collect::<Vec<&str>>();
+
+        const TRIMMED_HINT: &str = "以上行数被杜叔叔吃掉了！\n";
+
+        if lines.len() > 30 {
+            lines.truncate(30);
+            lines.push(TRIMMED_HINT);
+        }
+        
+        let trimmed = lines
+            .into_iter()
+            .rev()
+            .collect::<Vec<&str>>()
+            .join("\n");
+
         let msg =
-            InputMessage::text(trimmed).fmt_entities(vec![MessageEntity::Pre(MessageEntityPre {
+            InputMessage::text(&trimmed).fmt_entities(vec![MessageEntity::Pre(MessageEntityPre {
                 offset: 0,
                 length: trimmed.chars().count() as i32,
                 language: lang.to_string(),
@@ -227,14 +243,17 @@ impl TomorinClient {
     pub async fn handle_repeat(&self, m: &Message) -> anyhow::Result<()> {
         let reply_m = m.get_reply().await?;
         if let Some(reply) = reply_m
-            && reply.forward_to(reply.chat()).await.is_err() {
-                let mut input_message = InputMessage::text(reply.text())
-                    .fmt_entities(reply.fmt_entities().cloned().unwrap_or_default());
-                if let Some(ref media) = reply.media() {
-                    input_message = input_message.copy_media(media);
-                }
-                self.client.send_message(reply.chat(), input_message).await?;
+            && reply.forward_to(reply.chat()).await.is_err()
+        {
+            let mut input_message = InputMessage::text(reply.text())
+                .fmt_entities(reply.fmt_entities().cloned().unwrap_or_default());
+            if let Some(ref media) = reply.media() {
+                input_message = input_message.copy_media(media);
             }
+            self.client
+                .send_message(reply.chat(), input_message)
+                .await?;
+        }
         m.delete().await?;
 
         Ok(())
