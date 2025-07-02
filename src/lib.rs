@@ -3,6 +3,7 @@
 mod args;
 mod bot;
 mod conf;
+mod eval;
 
 use args::Args;
 use clap::Parser;

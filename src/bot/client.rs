@@ -87,11 +87,18 @@ impl TomorinClient {
                 {
                     const CMD_PREFIXES: [&str; 4] = [",", "，", ".", "。"];
                     const REPEAT: &str = "+";
+                    const EVAL: &str = "r#";
 
                     let text = m.text();
 
                     if text == REPEAT {
                         self.handle_repeat(&m).await?;
+                        return Ok(());
+                    }
+
+                    if text.starts_with(EVAL) {
+                        let code = text.trim_start_matches(EVAL);
+                        self.handle_eval(code, &m).await?;
                         return Ok(());
                     }
 
@@ -108,23 +115,29 @@ impl TomorinClient {
         Ok(())
     }
 
+    async fn handle_eval(&self, code: &str, m: &Message) -> anyhow::Result<()> {
+        use crate::eval::EvalClient;
+        m.edit("少女祈祷中......").await?;
+
+        let resp = EvalClient::intance().eval(code).await?;
+
+        self.edit_pre_msg(m, &resp, "Output").await
+    }
+
     async fn edit_pre_msg(&self, m: &Message, resp: &str, lang: &str) -> anyhow::Result<()> {
-        let trimmed = resp.trim();
-
-        let mut lines = trimmed.lines().rev().collect::<Vec<&str>>();
-
+        const MAX_LINES: usize = 30;
         const TRIMMED_HINT: &str = "以上行数被杜叔叔吃掉了！\n";
 
-        if lines.len() > 30 {
-            lines.truncate(30);
+        let trimmed = resp.trim();
+        let line_count = trimmed.lines().count();
+
+        let trimmed = if line_count > MAX_LINES {
+            let mut lines = trimmed.lines().rev().take(MAX_LINES).collect::<Vec<&str>>();
             lines.push(TRIMMED_HINT);
-        }
-        
-        let trimmed = lines
-            .into_iter()
-            .rev()
-            .collect::<Vec<&str>>()
-            .join("\n");
+            lines.into_iter().rev().collect::<Vec<&str>>().join("\n")
+        } else {
+            trimmed.to_string()
+        };
 
         let msg =
             InputMessage::text(&trimmed).fmt_entities(vec![MessageEntity::Pre(MessageEntityPre {
