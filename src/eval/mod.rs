@@ -4,10 +4,10 @@ use std::sync::LazyLock;
 
 use anyhow::Ok;
 
-mod eval;
+mod run;
 mod types;
 
-use eval::*;
+use run::*;
 use types::*;
 
 const EVAL_URL: &str = "https://play.rust-lang.org/execute";

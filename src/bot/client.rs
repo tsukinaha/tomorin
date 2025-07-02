@@ -121,7 +121,38 @@ impl TomorinClient {
 
         let resp = EvalClient::intance().eval(code).await?;
 
-        self.edit_pre_msg(m, &resp, "Output").await
+        self.edit_eval_msg(m, code, &resp).await
+    }
+
+    async fn edit_eval_msg(&self, m: &Message, code: &str, resp: &str) -> anyhow::Result<()> {
+        let code = code.trim();
+        let resp = resp.trim();
+        let code_entity = MessageEntity::Pre(MessageEntityPre {
+            offset: 0,
+            length: code.chars().count() as i32,
+            language: "Rust".to_string(),
+        });
+
+        let resp = format!("\n{resp}");
+
+        let resp_entity = MessageEntity::Pre(MessageEntityPre {
+            offset: code_entity.length(),
+            length: resp.chars().count() as i32,
+            language: "Output".to_string(),
+        });
+
+        let text = format!("{code}{resp}");
+
+        let msg = InputMessage::text(&text)
+            .fmt_entities(vec![code_entity, resp_entity]);
+
+        match m.edit(msg).await {
+            Err(grammers_client::InvocationError::Rpc(e)) if e.name == "MESSAGE_NOT_MODIFIED" => {
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+            Ok(_) => Ok(()),
+        }
     }
 
     async fn edit_pre_msg(&self, m: &Message, resp: &str, lang: &str) -> anyhow::Result<()> {
