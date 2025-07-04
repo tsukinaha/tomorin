@@ -11,7 +11,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "pro
 tracing = "0.1.40"
 tracing-subscriber = { version="0.3.18", features = ["chrono"] }
 reqwest = { version = "0.12", default-features = false, features = ["http2", "rustls-tls", "rustls-tls-native-roots", "json"] }
-grammers-client = "0.7.0"
+grammers-client = { version = "0.7.0", features = ["markdown"] }
 miette = { version="7.6.0", features=["fancy"] }
 knuffel = "3.2.0"
 futures-util = "0.3.31"
@@ -23,3 +23,5 @@ unicode-width = "0.2"
 htmlescape = "0.3"
 regex = "1"
 once_cell = "1.21"
+humantime = "2.2.0"
+sysinfo = "0.35.2"

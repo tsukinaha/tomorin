@@ -1,4 +1,4 @@
-use std::{process::Stdio, time::Duration};
+use std::{env, process::Stdio, time::Duration};
 
 use grammers_client::{
     Client, InputMessage,
@@ -11,9 +11,11 @@ use tokio::{
     time::{Instant, interval_at},
 };
 
+#[derive(Clone, Debug)]
 pub struct TomorinClient {
     pub client: Client,
     pub me: User,
+    pub start_time: std::time::Instant,
 }
 
 use crate::conf::Conf;
@@ -72,7 +74,13 @@ impl TomorinClient {
 
         let me = client.get_me().await?;
 
-        Ok(Self { client, me })
+        let start_time = std::time::Instant::now();
+
+        Ok(Self {
+            client,
+            me,
+            start_time,
+        })
     }
 
     pub async fn next_update(&self) -> anyhow::Result<grammers_client::Update> {
@@ -88,6 +96,8 @@ impl TomorinClient {
                     const CMD_PREFIXES: [&str; 4] = [",", "，", ".", "。"];
                     const REPEAT: &str = "+";
                     const EVAL: &str = "r#";
+                    const HELP: &str = "h#";
+                    const STATUS: &str = "s#";
 
                     let text = m.text();
 
@@ -106,7 +116,18 @@ impl TomorinClient {
                         if text.starts_with(prefix) {
                             let cmd = text.trim_start_matches(prefix);
                             self.handle_cmd(cmd, &m).await?;
+                            return Ok(());
                         }
+                    }
+
+                    if text.starts_with(HELP) {
+                        self.handle_help(&m).await?;
+                        return Ok(());
+                    }
+
+                    if text.starts_with(STATUS) {
+                        self.handle_status(&m).await?;
+                        return Ok(());
                     }
                 }
             }
@@ -143,8 +164,7 @@ impl TomorinClient {
 
         let text = format!("{code}{resp}");
 
-        let msg = InputMessage::text(&text)
-            .fmt_entities(vec![code_entity, resp_entity]);
+        let msg = InputMessage::text(&text).fmt_entities(vec![code_entity, resp_entity]);
 
         match m.edit(msg).await {
             Err(grammers_client::InvocationError::Rpc(e)) if e.name == "MESSAGE_NOT_MODIFIED" => {
@@ -284,6 +304,57 @@ impl TomorinClient {
         Ok(())
     }
 
+    pub async fn handle_help(&self, m: &Message) -> anyhow::Result<()> {
+        let help_text = "**Available commands**:
+
+`+` - Reply to forward/repeat the message    
+`r#<code>` - Evaluate Rust code    
+`<prefix><command>` - Execute a shell command (e.g., `,ls`, `，ls`, `.ls`, `。ls`)    
+`s#` - Show bot status    
+`h#` - Show this help message";
+        m.edit(InputMessage::markdown(&help_text)).await?;
+        Ok(())
+    }
+
+    pub async fn handle_status(&self, m: &Message) -> anyhow::Result<()> {
+        use chrono::Duration;
+
+        let uptime = std::time::Instant::now().duration_since(self.start_time);
+        let uptime_fmt = humantime::format_duration(uptime);
+
+        let start_dt = chrono::Local::now() - Duration::from_std(uptime).unwrap();
+        let start_time = start_dt.format("%Y-%m-%d %H:%M:%S");
+
+        let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+
+        let mut sys = sysinfo::System::new_all();
+        sys.refresh_all();
+        let pid = std::process::id();
+        let tomorin_mem_usage = sys
+            .process(sysinfo::Pid::from_u32(pid))
+            .map(|p| p.memory() as f64 / 1024.0)
+            .unwrap_or(0.0);
+        let os_version =
+            sysinfo::System::long_os_version().unwrap_or_else(|| "Unknown".to_string());
+
+        let version = env!("CARGO_PKG_VERSION");
+
+        let arch = env::consts::ARCH;
+        let status_text = format!(
+            "**Status**:   
+ 
+OS - {os_version} - {arch}    
+Start time - {start_time}    
+Uptime - {uptime_fmt}    
+Current time - {current_time}    
+Memory usage - {tomorin_mem_usage} KiB    
+Tomorin Version - {version}
+"
+        );
+        m.edit(InputMessage::markdown(&status_text)).await?;
+        Ok(())
+    }
+
     pub async fn handle_repeat(&self, m: &Message) -> anyhow::Result<()> {
         let reply_m = m.get_reply().await?;
         if let Some(reply) = reply_m
@@ -301,14 +372,5 @@ impl TomorinClient {
         m.delete().await?;
 
         Ok(())
-    }
-}
-
-impl Clone for TomorinClient {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            me: self.me.clone(),
-        }
     }
 }
