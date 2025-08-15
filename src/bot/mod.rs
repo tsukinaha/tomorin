@@ -41,7 +41,7 @@ impl UserBot {
                         tracing::error!("Error handling update: {e}");
                         tracing::error!("Tomorin will retry after 60 secs");
 
-                        tokio::time::sleep(Duration::from_secs(30));
+                        tokio::time::sleep(Duration::from_secs(30)).await;
                     }
                 }
             });
