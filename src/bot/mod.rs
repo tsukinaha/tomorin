@@ -2,7 +2,7 @@ mod client;
 
 use client::TomorinClient;
 use futures_util::future::{Either, select};
-use std::{pin::pin, sync::Arc};
+use std::{pin::pin, sync::Arc, time::Duration};
 use tokio::task;
 
 use super::conf::Conf;
@@ -37,7 +37,12 @@ impl UserBot {
             task::spawn(async move {
                 match client.update(update).await {
                     Ok(_) => {}
-                    Err(e) => tracing::error!("Error handling update: {e}"),
+                    Err(e) => {
+                        tracing::error!("Error handling update: {e}");
+                        tracing::error!("Tomorin will retry after 60 secs");
+
+                        tokio::time::sleep(Duration::from_secs(30));
+                    }
                 }
             });
         }
