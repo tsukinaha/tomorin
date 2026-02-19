@@ -94,7 +94,7 @@ impl TomorinClient {
             .stream_updates(
                 updates,
                 UpdatesConfiguration {
-                    catch_up: true,
+                    catch_up: false,
                     ..Default::default()
                 },
             )
@@ -276,8 +276,16 @@ impl TomorinHandler {
                     Err(e) => return Err(e.into()),
                 },
                 _ = ticker.tick() => {
+                    let done = stdout_done && stderr_done;
+
+                    if done {
+                        msg.push_str("Done.");
+                    }
                     self.edit_pre_msg(m, msg, lang).await?;
-                    if stdout_done && stderr_done { break; }
+
+                    if done {
+                        break;
+                    }
                 }
                 else => break,
             }
