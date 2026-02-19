@@ -1,9 +1,8 @@
-#![feature(async_fn_traits)]
-#![feature(fn_traits, unboxed_closures)]
+
 mod args;
 mod bot;
-mod conf;
 mod eval;
+mod conf;
 
 use args::Args;
 use clap::Parser;

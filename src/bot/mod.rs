@@ -1,46 +1,41 @@
 mod client;
 
 use client::TomorinClient;
-use futures_util::future::{Either, select};
-use std::{pin::pin, sync::Arc, time::Duration};
+use std::time::Duration;
 use tokio::task;
 
 use super::conf::Conf;
 
 pub struct UserBot {
-    client: Arc<TomorinClient>,
+    client: TomorinClient,
 }
 
 impl UserBot {
     pub async fn new(conf: Conf) -> anyhow::Result<Self> {
         Ok(Self {
-            client: Arc::new(TomorinClient::new(conf).await?),
+            client: TomorinClient::new(conf).await?,
         })
     }
 
-    pub async fn run(self) -> anyhow::Result<()> {
+    pub async fn run(mut self) -> anyhow::Result<()> {
         loop {
-            let exit = pin!(async { tokio::signal::ctrl_c().await });
-            let upd = pin!(async { self.client.next_update().await });
-
-            let update = match select(exit, upd).await {
-                Either::Left(_) => break,
-                Either::Right((u, _)) => u,
+            let update_res = tokio::select! {
+                _ = tokio::signal::ctrl_c() => break,
+                u = self.client.next_update() => u,
             };
 
-            let Ok(update) = update else {
+            let Ok(update) = update_res else {
                 tracing::warn!("Failed to get update");
                 continue;
             };
 
-            let client = self.client.clone();
+            let handler = self.client.handler();
             task::spawn(async move {
-                match client.update(update).await {
+                match handler.update(update).await {
                     Ok(_) => {}
                     Err(e) => {
                         tracing::error!("Error handling update: {e}");
-                        tracing::error!("Tomorin will retry after 60 secs");
-
+                        tracing::error!("Tomorin will retry after 30 secs");
                         tokio::time::sleep(Duration::from_secs(30)).await;
                     }
                 }
